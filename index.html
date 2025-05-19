@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Защищенный Чат</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.1.1/crypto-js.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+      .message-container {
+        max-height: calc(100vh - 240px);
+        min-height: 300px;
+      }
+
+      .message {
+        word-wrap: break-word;
+        max-width: 100%;
+        display: inline-block;
+      }
+
+      .my-message {
+        background-color: #dcf8c6;
+        border-radius: 1rem 0 1rem 1rem;
+      }
+
+      .their-message {
+        background-color: #f1f0f0;
+        border-radius: 0 1rem 1rem 1rem;
+      }
+
+      .loading-dots:after {
+        content: ' .';
+        animation: dots 1.5s steps(5, end) infinite;
+      }
+
+      @keyframes dots {
+
+        0%,
+        20% {
+          content: ' .';
+        }
+
+        40% {
+          content: ' ..';
+        }
+
+        60% {
+          content: ' ...';
+        }
+
+        80%,
+        100% {
+          content: '';
+        }
+      }
+
+      .username {
+        font-size: 0.75rem;
+        margin-bottom: 0.25rem;
+        font-weight: 500;
+      }
+
+      .my-username {
+        text-align: right;
+        color: #2e7d32;
+      }
+
+      .their-username {
+        color: #1565c0;
+      }
+
+      .participants-list {
+        max-height: 300px;
+        overflow-y: auto;
+      }
+
+      .sidebar {
+        width: 280px;
+        min-width: 280px;
+      }
+
+      .chat-area {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .system-message {
+        width: 100%;
+        text-align: center;
+        margin: 8px 0;
+      }
+
+      @media (max-width: 768px) {
+        .sidebar {
+          width: 100%;
+          min-width: 100%;
+        }
+
+        .layout-container {
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 font-sans">
+    <div class="container mx-auto px-4 py-6 max-w-5xl">
+      <!-- Заголовок -->
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl md:text-3xl font-bold text-gray-800 flex items-center">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mr-2 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg> Защищенный Чат
+        </h1>
+        <div class="flex items-center">
+          <span id="connectionStatus" class="text-sm text-gray-500 mr-2">Не подключено</span>
+          <span id="statusIndicator" class="h-3 w-3 rounded-full bg-gray-400"></span>
+        </div>
+      </div>
+      <!-- Экран приветствия -->
+      <div id="welcomeScreen" class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <h2 class="text-xl font-semibold mb-4 text-gray-800">Добро пожаловать в защищенный чат</h2>
+        <p class="text-gray-600 mb-6">Все сообщения шифруются и доступны только вам и вашим собеседникам.</p>
+        <div class="mb-4">
+          <label class="block text-gray-700 mb-2">Ваше имя:</label>
+          <input type="text" id="usernameInput" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Введите ваше имя">
+        </div>
+        <div id="createRoomSection">
+          <button id="createRoomBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors w-full mb-4"> Создать новую комнату </button>
+        </div>
+        <div id="joinRoomSection" class="hidden">
+          <div class="mb-4">
+            <label class="block text-gray-700 mb-2">Присоединиться по ID комнаты:</label>
+            <div class="flex">
+              <input type="text" id="roomIdInput" class="flex-1 border border-gray-300 rounded-l-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Введите ID комнаты">
+              <button id="joinRoomBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-r-md hover:bg-indigo-700 transition-colors"> Войти </button>
+            </div>
+          </div>
+        </div>
+        <div class="text-center">
+          <button id="toggleJoinCreate" class="text-indigo-600 hover:text-indigo-800 text-sm"> У меня уже есть ID комнаты </button>
+        </div>
+      </div>
+      <!-- Чат -->
+      <div id="chatContainer" class="hidden">
+        <div class="flex layout-container gap-4">
+          <!-- Список участников -->
+          <div class="bg-white rounded-lg shadow-md p-4 sidebar">
+            <h3 class="font-semibold text-gray-800 mb-2 flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg> Участники ( <span id="participantsCount">1</span>)
+            </h3>
+            <div id="participantsList" class="participants-list mb-4">
+              <!-- Участники будут добавлены динамически -->
+            </div>
+            <div class="mt-2 border-t border-gray-200 pt-4">
+              <p class="text-sm text-gray-600 mb-2">Поделитесь ссылкой для приглашения:</p>
+              <div class="flex">
+                <input type="text" id="shareLink" class="flex-1 border border-gray-300 rounded-l-md px-2 py-1 text-xs focus:outline-none" readonly>
+                <button id="copyLinkBtn" class="bg-indigo-600 text-white px-2 py-1 rounded-r-md hover:bg-indigo-700 transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          <!-- Область чата -->
+          <div class="bg-white rounded-lg shadow-md flex-1 flex flex-col chat-area">
+            <div id="messagesContainer" class="message-container p-4 overflow-y-auto flex flex-col space-y-3"></div>
+            <div class="border-t border-gray-200 p-4 mt-auto">
+              <form id="messageForm" class="flex">
+                <input type="text" id="messageInput" class="flex-1 border border-gray-300 rounded-l-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Введите сообщение...">
+                <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-r-md hover:bg-indigo-700 transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+        <div class="text-center mt-4">
+          <button id="leaveChat" class="text-red-600 hover:text-red-800 text-sm"> Покинуть чат </button>
+        </div>
+      </div>
+    </div>
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        // Основные элементы интерфейса
+        const welcomeScreen = document.getElementById('welcomeScreen');
+        const createRoomSection = document.getElementById('createRoomSection');
+        const joinRoomSection = document.getElementById('joinRoomSection');
+        const toggleJoinCreateBtn = document.getElementById('toggleJoinCreate');
+        const chatContainer = document.getElementById('chatContainer');
+        const messagesContainer = document.getElementById('messagesContainer');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const participantsList = document.getElementById('participantsList');
+        const participantsCount = document.getElementById('participantsCount');
+        // Кнопки и формы
+        const createRoomBtn = document.getElementById('createRoomBtn');
+        const joinRoomBtn = document.getElementById('joinRoomBtn');
+        const roomIdInput = document.getElementById('roomIdInput');
+        const shareLink = document.getElementById('shareLink');
+        const copyLinkBtn = document.getElementById('copyLinkBtn');
+        const messageForm = document.getElementById('messageForm');
+        const messageInput = document.getElementById('messageInput');
+        const usernameInput = document.getElementById('usernameInput');
+        const leaveChat = document.getElementById('leaveChat');
+        // Переменные для работы с шифрованием и соединением
+        let peer;
+        let connections = {};
+        let roomId;
+        let encryptionKey;
+        let myUsername;
+        let myPeerId;
+        let participants = {};
+        let isRoomCreator = false;
+        let roomCreatorId = null;
+        // Переключение между созданием и присоединением к комнате
+        toggleJoinCreateBtn.addEventListener('click', function() {
+          if (createRoomSection.classList.contains('hidden')) {
+            createRoomSection.classList.remove('hidden');
+            joinRoomSection.classList.add('hidden');
+            toggleJoinCreateBtn.textContent = 'У меня уже есть ID комнаты';
+          } else {
+            createRoomSection.classList.add('hidden');
+            joinRoomSection.classList.remove('hidden');
+            toggleJoinCreateBtn.textContent = 'Создать новую комнату';
+          }
+        });
+        // Функция для генерации случайного ID комнаты
+        function generateRoomId() {
+          return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        }
+        // Функция для генерации ключа шифрования
+        function generateEncryptionKey() {
+          return CryptoJS.lib.WordArray.random(16).toString();
+        }
+        // Функции шифрования и дешифрования
+        function encryptMessage(message, key) {
+          return CryptoJS.AES.encrypt(JSON.stringify(message), key).toString();
+        }
+
+        function decryptMessage(encryptedMessage, key) {
+          try {
+            const decrypted = CryptoJS.AES.decrypt(encryptedMessage, key).toString(CryptoJS.enc.Utf8);
+            return JSON.parse(decrypted);
+          } catch (e) {
+            console.error('Ошибка дешифрования:', e);
+            return null;
+          }
+        }
+        // Обновление списка участников
+        function updateParticipantsList() {
+          // Очищаем список
+          participantsList.innerHTML = '';
+          // Добавляем себя первым в список
+          const myItem = document.createElement('div');
+          myItem.className = 'flex items-center p-2 border-b border-gray-100';
+          myItem.innerHTML = `
+          
+										<div class="flex items-center">
+											<span class="h-2 w-2 rounded-full bg-green-500 mr-2"></span>
+											<span>${myUsername} (вы)</span>
+										</div>
+        `;
+          participantsList.appendChild(myItem);
+          // Обновляем счетчик участников (включая себя)
+          const participantCount = Object.keys(participants).length + 1;
+          participantsCount.textContent = participantCount;
+          // Добавляем остальных участников
+          Object.keys(participants).forEach(peerId => {
+            const username = participants[peerId];
+            const item = document.createElement('div');
+            item.className = 'flex items-center p-2 border-b border-gray-100';
+            item.innerHTML = `
+            
+										<div class="flex items-center">
+											<span class="h-2 w-2 rounded-full bg-green-500 mr-2"></span>
+											<span>${username}</span>
+										</div>
+          `;
+            participantsList.appendChild(item);
+          });
+        }
+        // Создание новой комнаты
+        createRoomBtn.addEventListener('click', function() {
+          // Проверяем, что имя введено
+          myUsername = usernameInput.value.trim();
+          if (!myUsername) {
+            alert('Пожалуйста, введите ваше имя');
+            return;
+          }
+          roomId = generateRoomId();
+          encryptionKey = generateEncryptionKey();
+          isRoomCreator = true;
+          // Инициализация Peer соединения
+          peer = new Peer(roomId);
+          peer.on('open', function(id) {
+            myPeerId = id;
+            roomCreatorId = id; // Сохраняем ID создателя комнаты
+            updateConnectionStatus('Комната создана', 'green');
+            welcomeScreen.classList.add('hidden');
+            chatContainer.classList.remove('hidden');
+            // Формирование ссылки для приглашения
+            const shareUrl = `${window.location.href.split('?')[0]}?room=${roomId}&key=${encryptionKey}`;
+            shareLink.value = shareUrl;
+            // Добавляем системное сообщение
+            addSystemMessage('Вы создали комнату. Ожидание подключения собеседников...');
+            // Обновляем список участников
+            updateParticipantsList();
+          });
+          // Обработка входящего соединения
+          peer.on('connection', function(conn) {
+            const peerId = conn.peer;
+            connections[peerId] = conn;
+            conn.on('open', function() {
+              setupConnectionEvents(conn);
+            });
+          });
+          peer.on('error', function(err) {
+            console.error('Ошибка подключения:', err);
+            updateConnectionStatus('Ошибка подключения', 'red');
+            alert('Произошла ошибка при создании комнаты: ' + err);
+          });
+        });
+        // Присоединение к существующей комнате
+        joinRoomBtn.addEventListener('click', function() {
+          // Проверяем, что имя введено
+          myUsername = usernameInput.value.trim();
+          if (!myUsername) {
+            alert('Пожалуйста, введите ваше имя');
+            return;
+          }
+          const roomIdToJoin = roomIdInput.value.trim();
+          if (!roomIdToJoin) {
+            alert('Пожалуйста, введите ID комнаты');
+            return;
+          }
+          // Получение ключа шифрования из URL если он есть
+          const urlParams = new URLSearchParams(window.location.search);
+          encryptionKey = urlParams.get('key') || prompt('Введите ключ шифрования:');
+          if (!encryptionKey) {
+            alert('Ключ шифрования обязателен для присоединения к чату');
+            return;
+          }
+          peer = new Peer();
+          peer.on('open', function(id) {
+            myPeerId = id;
+            roomCreatorId = roomIdToJoin; // Сохраняем ID создателя комнаты
+            updateConnectionStatus('Подключение...', 'yellow');
+            const conn = peer.connect(roomIdToJoin);
+            conn.on('open', function() {
+              connections[roomIdToJoin] = conn;
+              welcomeScreen.classList.add('hidden');
+              chatContainer.classList.remove('hidden');
+              updateConnectionStatus('Подключено', 'green');
+              // Формирование ссылки для приглашения
+              const shareUrl = `${window.location.href.split('?')[0]}?room=${roomIdToJoin}&key=${encryptionKey}`;
+              shareLink.value = shareUrl;
+              // Отправляем информацию о себе
+              conn.send(encryptMessage({
+                type: 'join',
+                username: myUsername,
+                peerId: myPeerId
+              }, encryptionKey));
+              setupConnectionEvents(conn);
+              // Обновляем список участников
+              updateParticipantsList();
+              // Добавляем системное сообщение о входе в чат
+              addSystemMessage('Вы присоединились к чату');
+            });
+            conn.on('error', function(err) {
+              console.error('Ошибка соединения:', err);
+              updateConnectionStatus('Ошибка соединения', 'red');
+              alert('Ошибка при подключении: ' + err);
+            });
+          });
+          peer.on('error', function(err) {
+            console.error('Ошибка подключения:', err);
+            updateConnectionStatus('Ошибка подключения', 'red');
+            alert('Не удалось подключиться к комнате: ' + err);
+          });
+        });
+        // Настройка событий соединения
+        function setupConnectionEvents(conn) {
+          conn.on('data', function(data) {
+            try {
+              const decrypted = decryptMessage(data, encryptionKey);
+              if (!decrypted) return;
+              const {
+                type,
+                forwarded
+              } = decrypted;
+              if (type === 'message') {
+                // Если это не наше сообщение, отображаем его
+                if (decrypted.peerId !== myPeerId) {
+                  addMessageToChat(decrypted.username, decrypted.message, false);
+                  // Ретранслируем сообщение только если оно еще не было ретранслировано
+                  if (!forwarded) {
+                    Object.entries(connections).forEach(([peerId, otherConn]) => {
+                      // Не отправляем обратно отправителю
+                      if (peerId !== decrypted.peerId && otherConn.open) {
+                        // Добавляем флаг, что это ретрансляция
+                        const forwardedMessage = {
+                          ...decrypted,
+                          forwarded: true
+                        };
+                        otherConn.send(encryptMessage(forwardedMessage, encryptionKey));
+                      }
+                    });
+                  }
+                }
+              } else if (type === 'join') {
+                // Новый участник присоединился
+                const {
+                  username,
+                  peerId
+                } = decrypted;
+                // Проверяем, не добавлен ли уже этот участник
+                if (!participants[peerId]) {
+                  participants[peerId] = username;
+                  updateParticipantsList();
+                  addSystemMessage(`${username} присоединился к чату`);
+                  // Если мы создатель комнаты, отправляем новому участнику информацию о текущих участниках
+                  if (isRoomCreator) {
+                    // Отправляем только текущий список участников, без добавления нового участника повторно
+                    conn.send(encryptMessage({
+                      type: 'init',
+                      participants: {
+                        ...participants
+                      },
+                      fromUsername: myUsername,
+                      fromPeerId: myPeerId
+                    }, encryptionKey));
+                    // Сообщаем всем о новом участнике
+                    broadcastToAll({
+                      type: 'participant_joined',
+                      username,
+                      peerId
+                    }, [peerId]); // Исключаем нового участника из рассылки
+                    // Для каждого существующего участника создаем соединение с новым участником
+                    Object.keys(participants).forEach(existingPeerId => {
+                      if (existingPeerId !== peerId && existingPeerId !== myPeerId) {
+                        conn.send(encryptMessage({
+                          type: 'connect_with',
+                          peerId: existingPeerId,
+                          username: participants[existingPeerId]
+                        }, encryptionKey));
+                      }
+                    });
+                  }
+                }
+              } else if (type === 'init') {
+                // Получаем информацию о текущих участниках при входе
+                if (decrypted.participants) {
+                  // Очищаем текущий список участников перед обновлением
+                  participants = {};
+                  // Добавляем всех участников из списка
+                  Object.keys(decrypted.participants).forEach(id => {
+                    if (id !== myPeerId) { // Исключаем себя из списка
+                      participants[id] = decrypted.participants[id];
+                    }
+                  });
+                  // Добавляем создателя комнаты, если его еще нет в списке
+                  if (decrypted.fromPeerId && decrypted.fromUsername && !participants[decrypted.fromPeerId]) {
+                    participants[decrypted.fromPeerId] = decrypted.fromUsername;
+                  }
+                  updateParticipantsList();
+                  // Устанавливаем соединения со всеми участниками
+                  Object.keys(participants).forEach(participantId => {
+                    if (participantId !== myPeerId && !connections[participantId]) {
+                      const newConn = peer.connect(participantId);
+                      newConn.on('open', function() {
+                        connections[participantId] = newConn;
+                        // Отправляем информацию о себе
+                        newConn.send(encryptMessage({
+                          type: 'direct_connect',
+                          username: myUsername,
+                          peerId: myPeerId
+                        }, encryptionKey));
+                        setupConnectionEvents(newConn);
+                      });
+                    }
+                  });
+                }
+              } else if (type === 'connect_with') {
+                // Создаем соединение с другим участником
+                const {
+                  peerId,
+                  username
+                } = decrypted;
+                if (peerId !== myPeerId && !connections[peerId]) {
+                  const newConn = peer.connect(peerId);
+                  newConn.on('open', function() {
+                    connections[peerId] = newConn;
+                    // Отправляем информацию о себе
+                    newConn.send(encryptMessage({
+                      type: 'direct_connect',
+                      username: myUsername,
+                      peerId: myPeerId
+                    }, encryptionKey));
+                    setupConnectionEvents(newConn);
+                  });
+                }
+              } else if (type === 'direct_connect') {
+                // Получаем прямое соединение от другого участника
+                const {
+                  peerId,
+                  username
+                } = decrypted;
+                if (!participants[peerId]) {
+                  participants[peerId] = username;
+                  updateParticipantsList();
+                }
+              } else if (type === 'participant_joined') {
+                // Обновление о новом участнике от создателя комнаты
+                const {
+                  username,
+                  peerId
+                } = decrypted;
+                // Проверяем, не добавлен ли уже этот участник
+                if (peerId !== myPeerId && !participants[peerId]) {
+                  participants[peerId] = username;
+                  updateParticipantsList();
+                  addSystemMessage(`${username} присоединился к чату`);
+                  // Пробуем установить соединение с новым участником
+                  if (!connections[peerId]) {
+                    const newConn = peer.connect(peerId);
+                    newConn.on('open', function() {
+                      connections[peerId] = newConn;
+                      // Отправляем информацию о себе
+                      newConn.send(encryptMessage({
+                        type: 'direct_connect',
+                        username: myUsername,
+                        peerId: myPeerId
+                      }, encryptionKey));
+                      setupConnectionEvents(newConn);
+                    });
+                  }
+                }
+              } else if (type === 'leave') {
+                // Участник покинул чат
+                const {
+                  peerId,
+                  username
+                } = decrypted;
+                if (participants[peerId]) {
+                  delete participants[peerId];
+                  delete connections[peerId];
+                  updateParticipantsList();
+                  addSystemMessage(`${username} покинул чат`);
+                }
+              }
+            } catch (error) {
+              console.error('Ошибка при обработке сообщения:', error);
+            }
+          });
+          conn.on('close', function() {
+            const peerId = conn.peer;
+            if (participants[peerId]) {
+              addSystemMessage(`${participants[peerId]} отключился`);
+              delete participants[peerId];
+              delete connections[peerId];
+              updateParticipantsList();
+            }
+          });
+          conn.on('error', function(err) {
+            console.error('Ошибка соединения:', err);
+          });
+        }
+        // Отправка сообщения всем участникам, кроме указанных в excludePeerIds
+        function broadcastToAll(messageObj, excludePeerIds = []) {
+          // Добавляем свой peerId к сообщению для идентификации отправителя
+          if (messageObj.type === 'message') {
+            messageObj.peerId = myPeerId;
+          }
+          const encrypted = encryptMessage(messageObj, encryptionKey);
+          Object.entries(connections).forEach(([peerId, conn]) => {
+            if (conn.open && !excludePeerIds.includes(peerId)) {
+              conn.send(encrypted);
+            }
+          });
+        }
+        // Отправка сообщений
+        messageForm.addEventListener('submit', function(e) {
+          e.preventDefault();
+          const message = messageInput.value.trim();
+          if (message) {
+            // Создаем объект сообщения
+            const messageObj = {
+              type: 'message',
+              username: myUsername,
+              message: message,
+              peerId: myPeerId,
+              timestamp: Date.now()
+            };
+            // Отправляем сообщение всем участникам
+            broadcastToAll(messageObj);
+            // Отображаем свое сообщение
+            addMessageToChat(myUsername, message, true);
+            messageInput.value = '';
+          }
+        });
+        // Добавление сообщения в чат
+        function addMessageToChat(username, message, isMine) {
+          const messageWrapper = document.createElement('div');
+          messageWrapper.className = isMine ? 'self-end' : 'self-start';
+          const usernameElement = document.createElement('div');
+          usernameElement.className = `username ${isMine ? 'my-username' : 'their-username'}`;
+          usernameElement.textContent = username;
+          const messageElement = document.createElement('div');
+          messageElement.classList.add('message', 'p-3', 'shadow-sm');
+          if (isMine) {
+            messageElement.classList.add('my-message');
+          } else {
+            messageElement.classList.add('their-message');
+          }
+          messageElement.textContent = message;
+          messageWrapper.appendChild(usernameElement);
+          messageWrapper.appendChild(messageElement);
+          messagesContainer.appendChild(messageWrapper);
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        // Добавление системного сообщения
+        function addSystemMessage(message) {
+          const messageElement = document.createElement('div');
+          messageElement.classList.add('system-message', 'text-gray-500', 'text-sm');
+          messageElement.textContent = message;
+          messagesContainer.appendChild(messageElement);
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        // Обновление статуса соединения
+        function updateConnectionStatus(status, color) {
+          connectionStatus.textContent = status;
+          statusIndicator.className = `h-3 w-3 rounded-full bg-${color}-500`;
+        }
+        // Копирование ссылки для приглашения
+        copyLinkBtn.addEventListener('click', function() {
+          shareLink.select();
+          document.execCommand('copy');
+          alert('Ссылка скопирована в буфер обмена');
+        });
+        // Выход из чата
+        leaveChat.addEventListener('click', function() {
+          // Сообщаем всем участникам о выходе
+          broadcastToAll({
+            type: 'leave',
+            username: myUsername,
+            peerId: myPeerId
+          });
+          // Закрываем все соединения
+          Object.values(connections).forEach(conn => {
+            if (conn.open) {
+              conn.close();
+            }
+          });
+          if (peer) {
+            peer.destroy();
+          }
+          // Сбрасываем состояние
+          connections = {};
+          participants = {};
+          // Обновляем интерфейс
+          chatContainer.classList.add('hidden');
+          welcomeScreen.classList.remove('hidden');
+          messagesContainer.innerHTML = '';
+          participantsList.innerHTML = '';
+          updateConnectionStatus('Не подключено', 'gray');
+          // Очищаем поле имени
+          usernameInput.value = '';
+        });
+        // Проверка URL на наличие параметров комнаты и ключа
+        function checkUrlForRoomParams() {
+          const urlParams = new URLSearchParams(window.location.search);
+          const roomParam = urlParams.get('room');
+          const keyParam = urlParams.get('key');
+          if (roomParam && keyParam) {
+            roomIdInput.value = roomParam;
+            encryptionKey = keyParam;
+            // Автоматическое присоединение к комнате
+            createRoomSection.classList.add('hidden');
+            joinRoomSection.classList.remove('hidden');
+            toggleJoinCreateBtn.textContent = 'Создать новую комнату';
+          }
+        }
+        // Проверяем URL при загрузке страницы
+        checkUrlForRoomParams();
+      });
+    </script>
+  </body>
+</html>
